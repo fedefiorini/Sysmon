@@ -1,11 +1,11 @@
 /**
 * author: liulei2010@ict.ac.cn
 * @20130629
-* sequentially scan the page table to check and re-new __access_bit, and cal. the number of hot pages. 
+* sequentially scan the page table to check and re-new __access_bit, and cal. the number of hot pages.
 * add shadow count index
 *
 * Modifications@20150130 recover from an unknown problem. This version works well.
-* 
+*
 */
 
 #include <linux/module.h>
@@ -35,7 +35,9 @@
 #include <linux/elf.h>
 #include <linux/sched.h>
 
-struct timer_list stimer; 
+#include <linux/version.h>
+
+struct timer_list stimer;
 static int scan_pgtable(void);
 static struct task_struct * traver_all_process(void);
 long long shadow1[300000];
@@ -50,7 +52,7 @@ int read_times[300000];//the reading times of each page.
 int write_times[300000];//the writting times of each page.
 int out_data[300000];
 int w2r,r2w;
-int history[400][300000];//the history of RD and WD 
+int history[400][300000];//the history of RD and WD
 int loops;
 int page_read_times[300000];
 int page_write_times[300000];
@@ -67,13 +69,13 @@ module_param(process_id, int, S_IRUGO|S_IWUSR);
 
 /**
  * liulei2010@ict.ac.cn
- * function: Get the memory mapping infor, and the distribution status at DRAM bank level. 
- * date:20150324 
+ * function: Get the memory mapping infor, and the distribution status at DRAM bank level.
+ * date:20150324
  */
 /*
 //0~31 slots, and each slot in bank_map[] denotes a DRAM bank (specific color)
 unsigned long bank_map[BANK_NUM], bank_map_hotpage[BANK_NUM], bank_acc_count[BANK_NUM];
-//denotes the bank index for each pages (i.e, hot pages), the information should be used to calculate the bank balance factor. 
+//denotes the bank index for each pages (i.e, hot pages), the information should be used to calculate the bank balance factor.
 //unsigned int bank_index_shadow[300000];
 */
 
@@ -120,7 +122,7 @@ unsigned int bank_index_shadow[300000];
  * date:20150429
  * function: get target color for a specific physical page with XOR policy
  * mapping:
- * bank bits with XOR: b1:14xor19, b2:15xor20, b3:17xor21, b4:18xor22, b5:16. 
+ * bank bits with XOR: b1:14xor19, b2:15xor20, b3:17xor21, b4:18xor22, b5:16.
  * platform: i3-2120. 8GB memory, 125MB/bank, 32 DRAM banks/per-channel, 2 channels
  */
 //#define XOR_14_15 (0xc)
@@ -131,7 +133,7 @@ unsigned int bank_index_shadow[300000];
 //#define BIT_16 (0x10)
 //get the XOR bits
 /*
-#define XOR_RIGHT(page) (((page_to_pfn(page)&(0xc))>>2) ^ ((page_to_pfn(page)&(0x80))>>7 | (page_to_pfn(page)&(0x100))>>7))   
+#define XOR_RIGHT(page) (((page_to_pfn(page)&(0xc))>>2) ^ ((page_to_pfn(page)&(0x80))>>7 | (page_to_pfn(page)&(0x100))>>7))
 #define XOR_LEFT(page) (((page_to_pfn(page)&(0x60))>>2) ^ ((page_to_pfn(page)&(0x600))>>6))
 #define XOR_MID(page) ((page_to_pfn(page)&(0x10))>>2)
 //get the bank id
@@ -147,7 +149,7 @@ unsigned int bank_index_shadow[300000];
 /*
  * #define BANK_COLOR1 (0x6)
  * #define BANK_COLOR2 (0x300)
- * #define PAGE_TO_COLOR(page) ((page_to_pfn(page)&(BANK_COLOR2))>>6 | (page_to_pfn(page)&(BANK_COLOR1))>>1)  
+ * #define PAGE_TO_COLOR(page) ((page_to_pfn(page)&(BANK_COLOR2))>>6 | (page_to_pfn(page)&(BANK_COLOR1))>>1)
  */
 /*
  * yanghao
@@ -254,7 +256,7 @@ static int __init timer_init(void)
      printk("leiliu: module init!\n");
      init_timer(&stimer);
      stimer.data = 0;
-     stimer.expires = jiffies + 5*HZ;  
+     stimer.expires = jiffies + 5*HZ;
      stimer.function = time_handler;
      add_timer(&stimer);
      return 0;
@@ -328,7 +330,7 @@ static void __exit timer_exit(void)
 
 #if 1
 //get the process of current running benchmark. The returned value is the pointer to the process.
-static struct task_struct * traver_all_process(void) 
+static struct task_struct * traver_all_process(void)
 {
 	struct pid * pid;
   	pid = find_vpid(process_id);
@@ -355,7 +357,7 @@ static int scan_pgtable(void)
      int hot_page[200];
      struct task_struct *bench_process = traver_all_process(); //get the handle of current running benchmark
      int i, j, times;
- 
+
      if(bench_process == NULL)
      {
           printk("leiliu: get no process handle in scan_pgtable function...exit&trying again...\n");
@@ -365,7 +367,7 @@ static int scan_pgtable(void)
           mm = bench_process->mm;
      if(mm == NULL)
      {
-          printk("leiliu: error mm is NULL, return back & trying...\n");          
+          printk("leiliu: error mm is NULL, return back & trying...\n");
           return 0;
      }
 
@@ -387,7 +389,7 @@ static int scan_pgtable(void)
         dirty_page[j] = 0;
         reuse_time[j] = 0;
      }
-     
+
      for(j=0;j<BANK_NUM;j++)
      {
          bank_map[j] = 0;
@@ -400,7 +402,7 @@ static int scan_pgtable(void)
 
      //yanghao
      times = 0;
-      
+
      //printk("re-set shadow\n");
      for(tmpp=0;tmpp<200;tmpp++)
      {
@@ -412,7 +414,7 @@ static int scan_pgtable(void)
           start = vma->vm_start;
           end = vma->vm_end;
           mm = vma->vm_mm;
-          //in each vma, we check all pages 
+          //in each vma, we check all pages
           for(address = start; address < end; address += PAGE_SIZE)
           {
               //scan page table for each page in this VMA
@@ -428,11 +430,11 @@ static int scan_pgtable(void)
               ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
               pte = *ptep;
               if(pte_present(pte))
-              {   
+              {
                   if(pte_young(pte)) // hot page
                   {
                       //re-set and clear  _access_bits to 0
-                      pte = pte_mkold(pte); 
+                      pte = pte_mkold(pte);
                       set_pte_at(mm, address, ptep, pte);
                       //yanghao:re-set and clear _dirty_bits to 0
                       pte = pte_mkclean(pte);
@@ -443,22 +445,22 @@ static int scan_pgtable(void)
               page_counts++;
           } // end for(adddress .....)
        } // end for(vma ....)
-        //5k instructions in idle 
-       // for(tmp=0;tmp<200*5;tmp++) {;} //1k instructions = 200 loops. 5 instructions/per loop. 
- 
+        //5k instructions in idle
+       // for(tmp=0;tmp<200*5;tmp++) {;} //1k instructions = 200 loops. 5 instructions/per loop.
+
         //count the number of hot pages
         if(bench_process == NULL)
-        {   
+        {
            printk("leiliu1: get no process handle in scan_pgtable function...exit&trying again...\n");
            return 0;
-        }   
+        }
         else // get the process
            mm = bench_process->mm;
         if(mm == NULL)
-        {   
-           printk("leiliu1: error mm is NULL, return back & trying...\n");    
+        {
+           printk("leiliu1: error mm is NULL, return back & trying...\n");
            return 0;
-        } 
+        }
         number_vpages = 0;
 
         sampling_interval = page_counts/250;//yanghao:
@@ -498,7 +500,7 @@ static int scan_pgtable(void)
 
                      if(pte_young(pte)) // hot pages
                      {
-                           int now = pos + number_vpages; 
+                           int now = pos + number_vpages;
                            //shadow[now]++;
                            shadow1[now]++;
                            hot_page[tmpp]++;
@@ -530,7 +532,7 @@ static int scan_pgtable(void)
                            }
                            else
                                read_times[now]++;
-                           
+
                      }
                      else
                      {
@@ -543,7 +545,7 @@ static int scan_pgtable(void)
                page_counts++;
            } //end for(address ......)
            number_vpages += (int)(end - start)/PAGE_SIZE;
-         } // end for(vma .....) */ 
+         } // end for(vma .....) */
       } //end 200 times repeats
       //yanghao:cal. the No. of random_page
       random_page += sampling_interval;
@@ -561,7 +563,7 @@ static int scan_pgtable(void)
       int avg_page_utilization, avg_hotpage, num_access;
       int hig, mid, low, llow, lllow, llllow, all_pages;
       int ri, wi;
-  
+
       hig=0,mid=0,low=0,llow=0,lllow=0,llllow=0,all_pages=0;
 /*      for(j=0;j<30*100*100;j++)
       {
@@ -583,16 +585,16 @@ static int scan_pgtable(void)
 
       //the values reflect the accessing frequency of each physical page.
       printk("[LOG: after sampling (200 loops) ...] ");
-      printk("the values denote the physical page accessing frequence.\n"); 
+      printk("the values denote the physical page accessing frequence.\n");
       printk("-->hig (150,200) is %d. Indicating the number of re-used pages is high.\n-->mid (100,150] is %d.\n-->low (64,100] is %d.\n-->llow (10,64] is %d. In locality,no too many re-used pages.\n-->lllow (5,10] is %d.\n-->llllow [1,5] is %d.\n", hig, mid, low, llow, lllow, llllow);
 
 
       avg_hotpage=0; //the average number of hot pages in each iteration.
       for(j=0;j<200;j++)
          avg_hotpage+=hot_page[j];
-      avg_hotpage/=(j+1); 
+      avg_hotpage/=(j+1);
 
-      /*  
+      /*
        * new step@20140704
        * (1)the different phases of memory utilization
        * (2)the avg. page accessing utilization
@@ -659,7 +661,7 @@ static int scan_pgtable(void)
 /*      gap = (i<200?1:(i/200));
       for (j=0;j<i;j+=gap)
           printk("%d ",out_data[j]);
-      
+
       for (i=0, j=0; j<300000; j++)
           if (read_times[j] < write_times[j])
               out_data[i++] = j;
@@ -668,7 +670,7 @@ static int scan_pgtable(void)
 /*
       gap = (i<200?1:(i/200));
       for (j=0;j<i;j+=gap)
-          printk("%d ",out_data[j]); 
+          printk("%d ",out_data[j]);
 */
 /*      printk("The number of pages(RD --> WD) is: %d \nThe number of pages(WD --> RD) is: %d \n",r2w,w2r);
       printk("\n");
@@ -680,7 +682,7 @@ static int scan_pgtable(void)
            printk("bank%d %ld, ",j,differences[j]);
        printk("\n");
 
-      /////////////////////////////      
+      /////////////////////////////
 
       /**
        * liulei@20150326
@@ -699,7 +701,7 @@ static int scan_pgtable(void)
       printk("\n");
       printk("max is %ld, min is %ld, diff is %ld\n", max_u,min_u,(max_u-min_u));
 
-      //show the distribution of *HOT pages*, and the hot graduate of DRAM banks, and if the graduate is hard to be described, we show the diff between max and min 
+      //show the distribution of *HOT pages*, and the hot graduate of DRAM banks, and if the graduate is hard to be described, we show the diff between max and min
       max_u=0,min_u=LONG_MAX;//yanghao:initialize min_u with LONG_MAX
       printk("bank distribution for HOT pages:");
       for(j=0;j<32;j++)
@@ -714,7 +716,7 @@ static int scan_pgtable(void)
 
       //show the logic access times in each DRAM bank
       for(j=0;j<30*100*100;j++)
-          //calculate the number of access times in each DRAM bank 
+          //calculate the number of access times in each DRAM bank
           if(shadow1[j]>-1)
                bank_acc_count[bank_index_shadow[j]]+=shadow1[j];
 

@@ -35,6 +35,8 @@
 #include <linux/elf.h>
 #include <linux/sched.h>
 
+#include <linux/version.h>
+
 /* Adjust these constants as required */
 #define ITERATIONS 200 /* the number of sampling loops */
 #define PAGE_ALL 300000 /* the total number of pages */
@@ -66,26 +68,39 @@ int dirty_page[ITERATIONS];/*to record the writting informations about random_pa
 static int process_id;
 module_param(process_id, int, S_IRUGO|S_IWUSR);
 
-/*begin to cal. the number of hot pages. And we will re-do it in every TIME_INTERVAL seconds.*/
-static void time_handler(unsigned long data)
+/**
+* begin to cal. the number of hot pages.
+* And we will re-do it in every TIME_INTERVAL seconds.
+*
+* Not sure if change will work..
+*/
+static void time_handler(struct timer_list* stimer)
 {
 	int win=0;
-	mod_timer(&stimer, jiffies + TIME_INTERVAL*HZ);
-	win = scan_pgtable(); /* 1 is win.*/
-	if(!win) /*we get no page, maybe something wrong occurs.*/
-		printk("sysmon: fail in scanning page table...\n");
+     	mod_timer(stimer, jiffies + TIME_INTERVAL*HZ);
+     	win = scan_pgtable(); /* 1 is win.*/
+     	if(!win) /* we get no page, maybe something wrong occurs.*/
+        	printk("sysmon: fail in scanning page table...\n");
 }
 
 static int __init timer_init(void)
 {
-	random_page = 50;/*yanghao:init the NO. of random_page.*/
 	printk("sysmon: module init!\n");
-	init_timer(&stimer);
-	stimer.data = 0;
-	stimer.expires = jiffies + TIME_INTERVAL*HZ;
-	stimer.function = time_handler;
-	add_timer(&stimer);
-	return 0;
+
+	random_page = 50;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+			__init_timer(&stimer, time_handler, 0);
+			stimer.function = time_handler; //make time_handler correctly?
+#else
+     	init_timer(&stimer);
+     	stimer.data = 0;
+			stimer.function = time_handler;
+#endif
+     	stimer.expires = jiffies + TIME_INTERVAL*HZ;
+
+     	add_timer(&stimer);
+     	return 0;
 }
 
 static void __exit timer_exit(void)
@@ -185,7 +200,12 @@ static int scan_pgtable(void)
 				pgd = pgd_offset(mm, address);
 				if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
 					continue;
-				pud = pud_offset(pgd, address);
+					#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
+							     /* Adjusted to match 5-level page table implementation */
+							     pud = pud_offset((p4d_t*) pgd, address);
+					#else
+							     pud = pud_offset(pgd, address);
+					#endif
 				if (pud_none(*pud) || unlikely(pud_bad(*pud)))
 					continue;
 				pmd = pmd_offset(pud, address);
@@ -245,7 +265,12 @@ static int scan_pgtable(void)
 				pgd = pgd_offset(mm, address);
 				if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
 					continue;
-				pud = pud_offset(pgd, address);
+					#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
+							     /* Adjusted to match 5-level page table implementation */
+							     pud = pud_offset((p4d_t*) pgd, address);
+					#else
+							     pud = pud_offset(pgd, address);
+					#endif
 				if (pud_none(*pud) || unlikely(pud_bad(*pud)))
 					continue;
 				pmd = pmd_offset(pud, address);
@@ -306,7 +331,7 @@ static int scan_pgtable(void)
 
 	/*the values reflect the accessing frequency of each physical page.*/
 	printk("[LOG: after sampling (%d loops) ...] ",ITERATIONS);
-	printk("the values denote the physical page accessing frequence.\n"); 
+	printk("the values denote the physical page accessing frequence.\n");
 	printk("-->hig (150,200) is %d. Indicating the number of re-used pages is high.\n",hig);
 	printk("-->mid (100,150] is %d.\n",mid);
 	printk("-->low (64,100] is %d.\n",low);
@@ -331,7 +356,7 @@ static int scan_pgtable(void)
 	printk("the total number of memory accesses is %ld, the average is %ld\n",
 			num_access, num_access / ITERATIONS);
 	avg_page_utilization = num_access / all_pages;
-	printk("Avg hot pages num is %ld, all used pages num is %d, avg utilization of each page is %d\n", 
+	printk("Avg hot pages num is %ld, all used pages num is %d, avg utilization of each page is %d\n",
 			avg_hotpage, all_pages, avg_page_utilization);
 	/*yanghao:print the information about reuse-distance*/
 	if ((times == 0) && (reuse_time[0] ==0))
