@@ -2,6 +2,17 @@ Sysmon
 ===========================================
 by [Lei Liu](http://www.escience.cn/people/LiuLei2010ict/index.html), Hao Yang, Mengyao Xie, Yong Li, Mingjie Xing
 
+Changes and updates by [Federico Fiorini](https://www.linkedin.com/in/fedefiorini13/).
+The current changes make this monitoring tool working with newer versions of the Linux Kernel, as it was built around 4.15.0 (Ubuntu 18.04 LTS).
+
+New Changes
+------------------------------------------
+* Added support for 4-level page tables, changed some naming conventions.
+
+  In //TODO section: support for 5-level page tables.
+
+* Removed use of Floating Point (FP) operations in kernel level for improved
+performance.
 
 System Monitor - The Kernel Module Edition
 -------------------------------------------
@@ -25,9 +36,9 @@ Release Overview
   recording situations of hot pages and cold pages with the method of random sampling, including:
 
   (1) the accessing frequency of each hot page of every iteration.
-  
+
   (2) the accessing frequency of each physical page of every iteration.
-  
+
   (3) the prediction of the total number of hot pages and LLC demand.
 * sysmon_reuse_distance.c
 
