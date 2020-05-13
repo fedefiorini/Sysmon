@@ -175,7 +175,8 @@ void add_array(unsigned long tag, int bank)
     hotpage_new[bank][new_index[bank]]=tag;
     new_index[bank]++;
 }
-void compare_array()
+
+void compare_array(void)
 {
     int i,j,k;
     for(i=0;i<BANK_NUM;i++)
@@ -193,7 +194,7 @@ void compare_array()
     }
     return;
 }
-void copy_to_history()
+void copy_to_history(void)
 {
     int i,j;
     for(i=0;i<BANK_NUM;i++)
@@ -229,10 +230,10 @@ void add_total_array(unsigned long tag, int bank)
 }
 
 //begin to cal. the number of hot pages. And we will re-do it in every 5 seconds.
-static void time_handler(unsigned long data)
+static void time_handler(struct timer_list *stimer)
 {
      int win=0;
-     mod_timer(&stimer, jiffies + 5*HZ);
+     mod_timer(stimer, jiffies + 5*HZ);
      win = scan_pgtable(); // 1 is win.
      if(!win) // we get no page, maybe something wrong occurs
           printk("leiliu: fail in scanning page table. goooooooo......\n");
@@ -245,7 +246,7 @@ static int __init timer_init(void)
      loops = 0;//yanghao:init the NO. of random_page.
 
      //yanghao
-     int i,j;
+     int i;
      for(i=0;i<BANK_NUM;i++)
      {
           history_index[i]=0;
@@ -254,12 +255,18 @@ static int __init timer_init(void)
      }
 
      printk("leiliu: module init!\n");
-     init_timer(&stimer);
-     stimer.data = 0;
-     stimer.expires = jiffies + 5*HZ;
-     stimer.function = time_handler;
-     add_timer(&stimer);
-     return 0;
+     #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+     			__init_timer(&stimer, time_handler, 0);
+     			stimer.function = time_handler; //make time_handler correctly?
+     #else
+          	init_timer(&stimer);
+          	stimer.data = 0;
+     			  stimer.function = time_handler;
+     #endif
+          	stimer.expires = jiffies + 5*HZ;
+
+          	add_timer(&stimer);
+          	return 0;
 }
 
 static void __exit timer_exit(void)
@@ -296,18 +303,18 @@ static void __exit timer_exit(void)
                  highr_yanghao++;
                  continue;
              }
-             if ((double)page_read_times[j]/page_write_times[j] > 2)
+             if ((int)page_read_times[j]/page_write_times[j] > 2)
              {
                  midhigh_yanghao++;
                  continue;
              }
-             if ((double)page_read_times[j]/page_write_times[j] < 2
-                && (double)page_read_times[j]/page_write_times[j] > 0.5)
+             if ((int)page_read_times[j]/page_write_times[j] < 2
+                && (int)2*(page_read_times[j]/page_write_times[j]) > 1)
              {
                  mid_yanghao++;
                  continue;
              }
-             if ((double)page_read_times[j]/page_write_times[j] < 0.5)
+             if ((int)2*(page_read_times[j]/page_write_times[j]) < 1)
                  midlow_yanghao++;
          }
          printk("[LOG]after sampling ...\n");
@@ -421,7 +428,12 @@ static int scan_pgtable(void)
               pgd = pgd_offset(mm, address);
               if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
                   continue;
-              pud = pud_offset(pgd, address);
+                  #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
+                  		     /* Adjusted to match 5-level page table implementation */
+                  		     pud = pud_offset((p4d_t*) pgd, address);
+                  #else
+                  		     pud = pud_offset(pgd, address);
+                  #endif
               if (pud_none(*pud) || unlikely(pud_bad(*pud)))
                   continue;
               pmd = pmd_offset(pud, address);
@@ -479,7 +491,12 @@ static int scan_pgtable(void)
                pgd = pgd_offset(mm, address);
                if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
                      continue;
-               pud = pud_offset(pgd, address);
+                     #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
+                     		     /* Adjusted to match 5-level page table implementation */
+                     		     pud = pud_offset((p4d_t*) pgd, address);
+                     #else
+                     		     pud = pud_offset(pgd, address);
+                     #endif
                if (pud_none(*pud) || unlikely(pud_bad(*pud)))
                      continue;
                pmd = pmd_offset(pud, address);

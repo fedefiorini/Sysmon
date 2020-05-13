@@ -139,12 +139,12 @@ static void __exit timer_exit(void)
                  continue;
              }
              if ((int)page_read_times[j]/page_write_times[j] < 2
-                && (int)page_read_times[j]/page_write_times[j] > 0.5)
+                && (int)2*(page_read_times[j]/page_write_times[j]) > 1)
              {
                  mid_yanghao++;
                  continue;
              }
-             if ((int)page_read_times[j]/page_write_times[j] < 0.5)
+             if ((int)2*(page_read_times[j]/page_write_times[j]) < 1)
                  midlow_yanghao++;
          }
          printk("[LOG]after sampling ...\n");
