@@ -25,6 +25,7 @@
 #include <linux/ksm.h>
 #include <linux/rmap.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/delayacct.h>
 #include <linux/init.h>
 #include <linux/writeback.h>
@@ -67,19 +68,20 @@ module_param(process_id, int, S_IRUGO|S_IWUSR);
 *
 * Not sure if change will work..
 */
-static void time_handler(struct timer_list* stimer)
+static void time_handler(struct timer_list* ltimer)
 {
 	int win=0;
-     	mod_timer(stimer, jiffies + TIME_INTERVAL*HZ);
+     	mod_timer(&stimer, jiffies + TIME_INTERVAL*HZ);
      	win = scan_pgtable(); /* 1 is win.*/
      	if(!win) /* we get no page, maybe something wrong occurs.*/
         	printk("sysmon: fail in scanning page table...\n");
+					// printk("process_id: %i\n", process_id);
 }
 
 static int __init timer_init(void)
 {
 	printk("sysmon: module init!\n");
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 			__init_timer(&stimer, time_handler, 0);
 			stimer.function = time_handler; //make time_handler correctly?
 #else
@@ -95,9 +97,9 @@ static int __init timer_init(void)
 
 static void __exit timer_exit(void)
 {
-	printk("Unloading sysmon module.\n");
-     	del_timer(&stimer);/*delete the timer*/
-     	return;
+		printk("Unloading sysmon module.\n");
+    del_timer(&stimer);/*delete the timer*/
+    return;
 }
 
 /**
@@ -107,9 +109,21 @@ static void __exit timer_exit(void)
 */
 static struct task_struct * traverse_all_process(void)
 {
-	struct pid * pid;
+		struct pid* pid;
+	 	pid_t pid_proc, vpid_proc;
+		// pid_t task_pid;
+
   	pid = find_vpid(process_id);
+
+		pid_proc = pid_nr(pid);
+		vpid_proc = pid_vnr(pid);
+		printk("PID: %i, VPID: %i, Current: %i\n", pid_proc, vpid_proc, process_id);
+		// task_pid = task_pid_nr(current);
+		// printk("Actual: %i\n", task_pid);
+
   	return pid_task(pid,PIDTYPE_PID);
+
+
 }
 
 /*pgtable sequential scan and count for __access_bits.*/
