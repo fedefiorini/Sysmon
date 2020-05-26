@@ -1,13 +1,13 @@
 /**
-* author: liulei2010@ict.ac.cn
-* @20130629
-* sequentially scan the page table to check and re-new __access_bit, and cal. the number of hot pages.
-* add shadow count index
+* author:	Federico Fiorini
+* date:		21-May-2020
 *
-* Modifications@20150130 recover from an unknown problem. This version works well.
-* By Lei Liu, Hao Yang, Mengyao Xie, Yong Li, Mingjie Xing
+* This version recalls the original work from L.Liu et alii.
+* Modifications should work with newer versions of Linux kernel (tested on
+* v4.15.0, Ubuntu 18.04 LTS). Retro-compatibility yet to be tested.
+*
+* This version includes changes to module initialization and memory management.
 */
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/sched.h>
@@ -26,363 +26,346 @@
 #include <linux/rmap.h>
 #include <linux/module.h>
 #include <linux/delayacct.h>
-#include <linux/init.h>
 #include <linux/writeback.h>
 #include <linux/memcontrol.h>
 #include <linux/mmu_notifier.h>
 #include <linux/kallsyms.h>
 #include <linux/swapops.h>
 #include <linux/elf.h>
-#include <linux/sched.h>
-
 #include <linux/version.h>
 
-/* Adjust these constants as required */
-#define ITERATIONS 200 /* the number of sampling loops */
-#define PAGE_ALL 300000 /* the total number of pages */
-#define TIME_INTERVAL 5 /* the time interval of cal. the number of hot pages */
+/* INFO: Adjust constants as required */
+/* No. of sampling loops */
+#define ITERATIONS		200
+/* No. of pages */
+#define PAGES_TOTAL  	300000
+/* Sampling interval */
+#define TIME_INTERVAL	5
+/* Ranges of page no. */
+#define VH			200
+#define H				150
+#define M				100
+#define L   		64
+#define VL_MAX	10
+#define VL_MIN	5
+/**************************************/
 
-/* the constants below denote the different ranges of the page number */
-#define VH 200 /* VH means very high*/
-#define H 150 /* H means high*/
-#define M 100 /* M means middle*/
-#define L 64 /* L means low */
-#define VL_MAX 10 /* VL means very low */
-#define VL_MIN 5
-
-/*pgtable sequential scan and count for __access_bits.*/
-static int scan_pgtable(void);
-/*get the process of current running benchmark. The returned value is the pointer to the process.*/
-static struct task_struct * get_current_process(void);
-/* the array that records page access freq., which reflects the page "heat". */
+/* Variables declaration */
 struct timer_list stimer;
-long long page_heat[PAGE_ALL];
+long long page_heat[PAGES_TOTAL];
+int page_counts 			= 0;	// Records no. of used pages
+int reuse_time[ITERATIONS];
+int dirty_page[ITERATIONS];
+int random_page;
+int sampling_interval	= 0;
 
-/*write by yanghao*/
-int page_counts = 0;/*to record number of used page.*/
-int reuse_time[ITERATIONS];/*to record each ITERATIONS loops the reuse_distance of one page.*/
-int random_page;/*the No. of page being monitored.*/
-int sampling_interval = 0;/*random_page's sampling interval.*/
-int dirty_page[ITERATIONS];/*to record the writting informations about random_page.*/
-/* pid passed in. Write by xiemengyao.*/
 static int process_id;
-module_param(process_id, int, S_IRUGO|S_IWUSR);
+module_param(process_id, int, S_IRUGO|S_IWUSR); //Define process_id as module parameter
+/*************************/
 
-/**
-* begin to cal. the number of hot pages.
-* And we will re-do it in every TIME_INTERVAL seconds.
-*
-* Not sure if change will work..
-*/
-static void time_handler(struct timer_list* stimer)
+/* Memory Access Functions */
+static int scan_pgtable(void);
+/***************************/
+
+/* Timer functions (init, exit, timer handler) */
+static void timer_handler(struct timer_list *aTimer)
 {
-	int win=0;
-     	mod_timer(stimer, jiffies + TIME_INTERVAL*HZ);
-     	win = scan_pgtable(); /* 1 is win.*/
-     	if(!win) /* we get no page, maybe something wrong occurs.*/
-        	printk("sysmon: fail in scanning page table...\n");
+  int found = 0;
+
+  mod_timer(&stimer, jiffies + (TIME_INTERVAL * HZ));
+
+  found = scan_pgtable();
+  if (!found)
+  {
+    /* Failed to get some results in scanning pages.
+        Something must've gone wrong... */
+    printk("SysMon: Scanning Page Table Failed....\n");
+  }
 }
 
 static int __init timer_init(void)
 {
-	printk("sysmon: module init!\n");
+  timer_setup(&stimer, timer_handler, 0);
+  stimer.function = timer_handler;
+  stimer.expires  = jiffies + (TIME_INTERVAL * HZ);
+
+  add_timer(&stimer);
+  printk("SysMon: Module Init!\n");
 
 	random_page = 50;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
-			__init_timer(&stimer, time_handler, 0);
-			stimer.function = time_handler; //make time_handler correctly?
-#else
-     	init_timer(&stimer);
-     	stimer.data = 0;
-			stimer.function = time_handler;
-#endif
-     	stimer.expires = jiffies + TIME_INTERVAL*HZ;
-
-     	add_timer(&stimer);
-     	return 0;
+  return 0;
 }
 
 static void __exit timer_exit(void)
 {
-	printk("Unloading sysmon module.\n");
-	del_timer(&stimer);/*delete the timer*/
-	return;
-}
+  del_timer(&stimer);
+  printk("SysMon: Module Unloaded!\n");
 
-/*get the process of current running benchmark. The returned value is the pointer to the process.*/
-static struct task_struct * get_current_process(void)
-{
-	struct pid * pid;
-	pid = find_vpid(process_id);
-	return pid_task(pid,PIDTYPE_PID);
+  return;
 }
+/***********************************************/
 
-/*pgtable sequential scan and count for __access_bits.*/
+/* Memory scanning implementation */
 static int scan_pgtable(void)
 {
+	/* Current process */
+	struct task_struct *proc;
+
+	/* Page Table Levels (implemented 5-level) */
 	pgd_t *pgd = NULL;
+	p4d_t *p4d = NULL;
 	pud_t *pud = NULL;
 	pmd_t *pmd = NULL;
 	pte_t *ptep, pte;
+
 	spinlock_t *ptl;
 
+	/* Memory Management variables */
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
-	unsigned long start = 0; /*the start of address.*/
-	unsigned long end = 0;   /*the end of address.*/
-	unsigned long address = 0; /* the address of vma.*/
-	int number_hotpages = 0; /* the number of hot pages */
-	int number_vpages = 0;
-	int cycle_index = 0; /* the loop counter, which denotes ITERATIONS. */
-	/* the array that records the number of hot page in every cycle */
-	int hot_page[ITERATIONS];
-	int number_current_pg = 0;
-	int pg_count = 0;
-	int j = 0;
-	int times = 0; /* records reuse time*/
+	unsigned long start 	= 0;
+	unsigned long end			= 0;
+	unsigned long address = 0;
 
-	/* some variables that describe page "heat" */
-	int hig = 0;
-	int mid = 0;
-	int low = 0;
-	int llow = 0;
-	int lllow = 0;
-	int llllow = 0;
-	int all_pages = 0;/* the total number of pages */
-	/*the average number of hot pages in each iteration.*/
-	long avg_hotpage=0;
-	/*the total number of memory accesses across all pages*/
-	long num_access=0;
-	/* avg utilization of each page */
-	int avg_page_utilization = 0;
+	/* Memory report variables */
+	int num_hot_pages = 0;  // No. of hot pages
+	int num_vpages    = 0;
+	int cycle_index   = 0;  // Loop counter
+	int hot_pages[ITERATIONS];
+	int i             = 0;
+	int times 				= 0;	// Records Re-Use time
 
-	/*get the handle of current running benchmark.*/
-	struct task_struct *bench_process = get_current_process();
-	if(bench_process == NULL)
-	{
-		printk("sysmon: get no process handle in scan_pgtable function...exit&trying again...\n");
-		return 0;
-	}
-	else /* get the process*/
-		mm = bench_process->mm;
-	if(mm == NULL)
-	{
-		printk("sysmon: error mm is NULL, return back & trying...\n");
-		return 0;
-	}
+	/* Temporary counters */
+	int pg_cnt        = 0;
+	int num_cur_pg    = 0;
 
-	for(j = 0; j < PAGE_ALL; j++)
-		page_heat[j] = -1;
+	/* Page "heat" variables */
+	int h             = 0;
+	int m             = 0;
+	int l             = 0;
+	int l2            = 0;
+	int l3            = 0;
+	int l4            = 0;
 
-	for(j = 0; j < ITERATIONS; j++)
-	{
-		hot_page[j] = 0;
-		reuse_time[j] = 0;
-		dirty_page[j] = 0;
-	}
+	int all_pages     = 0;  // Total no. of pages
+	int avg_hotpage   = 0;  // Avg no. of hot pages (per iteration)
+	int num_access    = 0;  // Total no. of memory accesses (all pages)
+	int avg_pg_util   = 0;  // Avg utilization for each page
 
-	/*yanghao*/
-	times = 0;
-	for(cycle_index = 0; cycle_index < ITERATIONS; cycle_index++)
-	{
-		number_hotpages = 0;
-		/*scan each vma*/
-		for(vma = mm->mmap; vma; vma = vma->vm_next)
+	if ((proc = get_current()) == NULL)
+  {
+    // Something went wrong...
+    printk("SysMon: Get No Process Handle. Exit and Try Again \n");
+    return 0;
+  }
+  else
+  {
+    //mm = proc->mm; changed to active_mm (kernel thread)
+    mm = proc->active_mm;
+    if (mm == NULL)
+    {
+      // Something went wrong...
+      printk("SysMon: MM is NULL. Exit and Try Again \n");
+      return 0;
+    }
+
+    for (i = 0; i < PAGES_TOTAL; i++) page_heat[i] = -1;
+    for (i = 0; i < ITERATIONS; i++)
 		{
-			start = vma->vm_start;
-			end = vma->vm_end;
-			mm = vma->vm_mm;
-			/*in each vma, we check all pages*/
-			for(address = start; address < end; address += PAGE_SIZE)
-			{
-				/*scan page table for each page in this VMA*/
-				pgd = pgd_offset(mm, address);
-				if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-					continue;
-					#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
-							     /* Adjusted to match 5-level page table implementation */
-							     pud = pud_offset((p4d_t*) pgd, address);
-					#else
-							     pud = pud_offset(pgd, address);
-					#endif
-				if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-					continue;
-				pmd = pmd_offset(pud, address);
-				if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
-					continue;
-				ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
-				pte = *ptep;
-				if(pte_present(pte))
-				{
-					if(pte_young(pte)) /*hot page*/
-					{
-						/*re-set and clear  _access_bits to 0*/
-						pte = pte_mkold(pte);
-						set_pte_at(mm, address, ptep, pte);
-						/*yanghao:re-set and clear _dirty_bits to 0*/
-						pte = pte_mkclean(pte);
-						set_pte_at(mm, address, ptep, pte);
-					}
-				}
-				else /*no page pte_none*/
-				{
-					pte_unmap_unlock(ptep, ptl);
-					continue;
-				}
-				pte_unmap_unlock(ptep, ptl);
-				page_counts++;
-			}
+			hot_pages[i] 	= 0;
+			reuse_time[i] = 0;
+			dirty_page[i] = 0;
 		}
-		/*count the number of hot pages*/
-		if(bench_process == NULL)
-		{
-			printk("sysmon: get no process handle in scan_pgtable function...exit&trying again...\n");
-			return 0;
-		}
-		else /*get the process*/
-			mm = bench_process->mm;
-		if(mm == NULL)
-		{
-			printk("sysmon: error mm is NULL, return back & trying...\n");
-			return 0;
-		}
-		number_vpages = 0;
 
-		sampling_interval = page_counts / 250; /*yanghao:*/
-		page_counts = 0;
+		times = 0;
+    for (cycle_index = 0; cycle_index < ITERATIONS; cycle_index++)
+    {
+      // Initialize the no. of hot pages to zero at every loop
+      num_hot_pages = 0;
 
-		for(vma = mm->mmap; vma; vma = vma->vm_next)
-		{
-			start = vma->vm_start;
-			end = vma->vm_end;
-			/*scan each page in this VMA*/
-			mm = vma->vm_mm;
-			pg_count = 0;
-			for(address = start; address < end; address += PAGE_SIZE)
-			{
-				/*scan page table for each page in this VMA*/
-				pgd = pgd_offset(mm, address);
-				if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-					continue;
-					#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
-							     /* Adjusted to match 5-level page table implementation */
-							     pud = pud_offset((p4d_t*) pgd, address);
-					#else
-							     pud = pud_offset(pgd, address);
-					#endif
-				if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-					continue;
-				pmd = pmd_offset(pud, address);
-				if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
-					continue;
-				ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
-				pte = *ptep;
-				if(pte_present(pte))
-				{
-					if(pte_young(pte)) /* hot pages*/
-					{
-						number_current_pg = pg_count + number_vpages;
-						page_heat[number_current_pg]++;
-						hot_page[cycle_index]++;
-						/*yanghao:*/
-						if (page_counts == random_page)
+      // Start scanning each VMA
+      for (vma = mm->mmap; vma; vma = vma->vm_next)
+      {
+        start = vma->vm_start;
+        end   = vma->vm_end;
+        mm    = vma->vm_mm;
+
+        /* Check all pages for each VMA */
+        for (address = start; address < end; address += PAGE_SIZE)
+        {
+          /* Scan page table levels for each page */
+          pgd = pgd_offset(mm, address);
+          if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+            continue;
+          p4d = p4d_offset(pgd, address);
+          if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
+            continue;
+          pud = pud_offset(p4d, address);
+          if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+            continue;
+          pmd = pmd_offset(pud, address);
+          if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+            continue;
+
+          ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
+          pte  = *ptep;
+          if (pte_present(pte))
+          {
+            if (pte_young(pte))
+            {
+              // Hot Page. Reset and clear Access bit
+              pte = pte_mkold(pte);
+              set_pte_at(mm, address, ptep, pte);
+
+							// Reset and clear Dirty Bit
+							pte = pte__mkclean(pte);
+							set_pte_at(mm, address, ptep, pte);
+            }
+          }
+          else
+          {
+            // No Page
+            pte_unmap_unlock(ptep, ptl);
+            continue;
+          }
+          pte_unmap_unlock(ptep, ptl);
+					page_counts++;
+        }
+      }
+
+      // Count no. of hot pages
+      num_vpages 				= 0;
+			sampling_interval = page_counts / 250;
+			page_counts 			= 0;
+
+      for (vma = mm->mmap; vma; vma = vma->vm_next)
+      {
+        start   = vma->vm_start;
+        end     = vma->vm_end;
+        mm      = vma->vm_mm;
+
+        pg_cnt = 0;
+        for (address = start; address < end; address += PAGE_SIZE)
+        {
+          /* Scan page table levels for each page */
+          pgd = pgd_offset(mm, address);
+          if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+            continue;
+          p4d = p4d_offset(pgd, address);
+          if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
+            continue;
+          pud = pud_offset(p4d, address);
+          if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+            continue;
+          pmd = pmd_offset(pud, address);
+          if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+            continue;
+
+          ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
+          pte  = *ptep;
+
+          if (pte_present(pte))
+          {
+            if (pte_young(pte))
+            {
+              // Hot Pages
+              num_cur_pg = pg_cnt + num_vpages;
+              page_heat[num_cur_pg]++;
+              hot_pages[cycle_index]++;
+
+							if (page_counts == random_page)
+							{
+								times++;
+								if (pte_dirty(pte)) dirty_page[cycle_index] = 1;
+							}
+            }
+						else
 						{
-							times++;
-							if (pte_dirty(pte))
-								dirty_page[cycle_index] = 1;
+							if (page_counts == random_page) reuse_time[times]++;
 						}
-					}
-					else
-					{
-						if (page_counts == random_page)
-							reuse_time[times]++;
-					}
-				}
-				pg_count++;
-				pte_unmap_unlock(ptep, ptl);
-				page_counts++;
-			}
-			number_vpages += (int)(end - start)/PAGE_SIZE;
-		}
-	}
-	/*yanghao:cal. the No. of random_page*/
-	random_page += sampling_interval;
-	if(random_page >= page_counts)
-		random_page=page_counts / 300;
-	/*****************************OUTPUT************************************/
-	for(j = 0; j < PAGE_ALL; j++)
-	{
-		if(page_heat[j] < VH && page_heat[j] > H)
-			hig++;
-		if(page_heat[j] > M && page_heat[j] <= H)
-			mid++;
-		if(page_heat[j] <= M && page_heat[j] > L)
-			low++;
-		if(page_heat[j] > VL_MAX && page_heat[j] <= L)
-			llow++;
-		if(page_heat[j] > VL_MIN && page_heat[j] <= VL_MAX)
-			lllow++;
-		if(page_heat[j] >= 0 && page_heat[j] <= VL_MIN)
-			llllow++;
-		if(page_heat[j] > -1)
-			all_pages++;
-	}
+          }
+          pg_cnt++;
+					page_counts++;
+          pte_unmap_unlock(ptep, ptl);
+        }
+        num_vpages += (int)((end - start) / PAGE_SIZE);
+      }
+    }
 
-	/*the values reflect the accessing frequency of each physical page.*/
-	printk("[LOG: after sampling (%d loops) ...] ",ITERATIONS);
-	printk("the values denote the physical page accessing frequence.\n");
-	printk("-->hig (150,200) is %d. Indicating the number of re-used pages is high.\n",hig);
-	printk("-->mid (100,150] is %d.\n",mid);
-	printk("-->low (64,100] is %d.\n",low);
-	printk("-->llow (10,64] is %d. In locality,no too many re-used pages.\n",llow);
-	printk("-->lllow (5,10] is %d.\n",lllow);
-	printk("-->llllow [1,5] is %d.\n",llllow);
+		random_page += sampling_interval;
+		if (random_page >= page_counts) random_page = (int) page_counts / 300;
 
-	for(j = 0;j < ITERATIONS; j++)
-		avg_hotpage += hot_page[j];
-	avg_hotpage /= (j+1);
+    /******************************OUTPUT******************************/
+    for (i = 0; i < PAGES_TOTAL; i++)
+    {
+      if (page_heat[i] < VH && page_heat[i] > H) h++;
+      if (page_heat[i] <= H && page_heat[i] > M) m++;
+      if (page_heat[i] <= M && page_heat[i] > L) l++;
+      if (page_heat[i] <= L && page_heat[i] > VL_MAX) l2++;
+      if (page_heat[i] <= VL_MAX && page_heat[i] > VL_MIN) l3++;
+      if (page_heat[i] <= VL_MIN && page_heat[i] > 0) l4++;
+      if (page_heat[i] > -1) all_pages++;
+    }
 
-	/*
-	 * new step@20140704
-	 * (1)the different phases of memory utilization
-	 * (2)the avg. page accessing utilization
-	 * (3)memory pages layout and spectrum
-	 */
-	for(j = 0; j < PAGE_ALL; j++)
-		if(page_heat[j] > -1) /*the page that is accessed at least once.*/
-			num_access += (page_heat[j] + 1);
+    /* Print results on screen (dmesg output - syslog) */
+    printk("[LOG]: After %d sampling loops ", ITERATIONS);
+    printk("this is the result of the physical page accessing frequence\n");
+    printk("H(150,200): %d\n", h);
+    printk("M(100,150]: %d\n", m);
+    printk("L(64,100]: %d\n",  l);
+    printk("LL(10,64]: %d\n",  l2);
+    printk("LLL(5,10]: %d\n",  l3);
+    printk("LLLL(1,5]: %d\n",  l4);
 
-	printk("the total number of memory accesses is %ld, the average is %ld\n",
-			num_access, num_access / ITERATIONS);
-	avg_page_utilization = num_access / all_pages;
-	printk("Avg hot pages num is %ld, all used pages num is %d, avg utilization of each page is %d\n",
-			avg_hotpage, all_pages, avg_page_utilization);
-	/*yanghao:print the information about reuse-distance*/
-	if ((times == 0) && (reuse_time[0] ==0))
-		printk("the page No.%d is not available.",random_page);
-	else
-	{
-		if ((times == 0) && (reuse_time[0] == 0))
-			printk("the page No.%d was not used in this 200 loops.",random_page);
+    /* Calculate average number of hot pages per iteration */
+    for (i = 0; i < ITERATIONS; i++)
+    {
+      avg_hotpage += hot_pages[i];
+      avg_hotpage /= (i + 1);
+    }
+
+    /* Print results for memory accesses across all pages */
+    for (i = 0; i < ITERATIONS; i++)
+    {
+      if (page_heat[i] > -1) num_access += (page_heat[i] + 1);
+    }
+    printk("[LOG]: The number of accesses is %d, on average %d \n", num_access, num_access / ITERATIONS);
+    avg_pg_util = num_access / all_pages;
+
+    printk("[LOG]: The average number of hot pages is %d, ", avg_hotpage);
+    printk("the average utilization per page is %d ", avg_pg_util);
+    printk("and the number of used pages is %d\n", all_pages);
+
+		if ((times == 0) && (reuse_time[0] == 0)) printk("[LOG]: Page no. %d is not available", random_page);
 		else
 		{
-			if (times < ITERATIONS)
-				times++;
-			printk("the reusetime of page No.%d is:",random_page);
-			for (j = 0; j < times; j++)
-				printk("%d ",reuse_time[j]);
-			printk("\n");
-			printk("the total number of the digit above denotes the sum that page NO.%d be accessd in %d loops.\n",
-					random_page,ITERATIONS);
-			printk("each digit means the sum loops that between current loop and the last loop.\n");
-		}
-	}
-	printk("\n\n");
-	return 1;
-}
+			if ((times == 0) && (reuse_time[0] == 0)) printk("Page no. %d was not used in this %d loops",
+																										random_page, ITERATIONS);
+			else
+			{
+				if (times < ITERATIONS) times++;
+				printk("The Re-Use Time of page no. %d is ", random_page);
+				for (i = 0; i < times; i++) printk("%d", reuse_time[i]);
+				printk("\n");
 
+				/* Comment from older version */
+				/* 		printk("the total number of the digit above denotes the sum that page NO.%d be accessd in %d loops.\n",
+									random_page,ITERATIONS);
+							printk("each digit means the sum loops that between current loop and the last loop.\n");*/
+				/******************************/
+			}
+		}
+    /******************************************************************/
+
+    return 1;
+  }
+}
+/**********************************/
+
+/* Module configuration */
 module_init(timer_init);
 module_exit(timer_exit);
-MODULE_AUTHOR("leiliu");
+MODULE_AUTHOR("ffiorini");
 MODULE_LICENSE("GPL");
+/************************/
