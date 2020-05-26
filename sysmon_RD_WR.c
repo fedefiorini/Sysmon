@@ -362,10 +362,10 @@ static int scan_pgtable(void)
 							if (page_counts == random_page) times++;
 							if (pte_dirty(pte))
 							{
-								write_times[num_cur_pg]++;
+								wr_times[num_cur_pg]++;
 								if (page_counts == random_page) dirty_page[cycle_index]++;
 							}
-							else read_times[num_cur_pg]++;
+							else rd_times[num_cur_pg]++;
             }
 						else
 						{
