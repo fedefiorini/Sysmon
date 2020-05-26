@@ -219,7 +219,7 @@ static int scan_pgtable(void)
               set_pte_at(mm, address, ptep, pte);
 
 							// Reset and clear Dirty Bit
-							pte = pte__mkclean(pte);
+							pte = pte_mkclean(pte);
 							set_pte_at(mm, address, ptep, pte);
             }
           }
