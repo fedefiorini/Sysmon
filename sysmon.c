@@ -34,7 +34,6 @@
 #include <linux/kallsyms.h>
 #include <linux/swapops.h>
 #include <linux/elf.h>
-#include <linux/sched.h>
 #include <linux/version.h>
 
 /* INFO: Adjust constants as required */
@@ -56,8 +55,8 @@
 /* Variables declaration */
 struct timer_list stimer;
 long long page_heat[PAGES_TOTAL];
-static int process_id;
 
+static int process_id;
 module_param(process_id, int, S_IRUGO|S_IWUSR); //Define process_id as module parameter
 /*************************/
 
@@ -156,9 +155,6 @@ static int scan_pgtable(void)
   }
   else
   {
-    printk("Process PID: %d\n", proc->pid); // Debug Print
-    printk("Process State: %ld\n", proc->state);
-
     //mm = proc->mm; changed to active_mm (kernel thread)
     mm = proc->active_mm;
     if (mm == NULL)
