@@ -42,7 +42,7 @@
 /* No. of pages */
 #define PAGES_TOTAL  	300000
 /* Sampling interval */
-#define TIME_INTERVAL	5
+#define TIME_INTERVAL	30
 /* Ranges of page no. */
 #define VH			200
 #define H				150
@@ -155,7 +155,8 @@ static int scan_pgtable(void)
   }
   else
   {
-    //mm = proc->mm; changed to active_mm (kernel thread)
+    printk("SysMon: Process retrieved successfully\n");
+
     mm = proc->active_mm;
     if (mm == NULL)
     {
@@ -163,6 +164,8 @@ static int scan_pgtable(void)
       printk("SysMon: MM is NULL. Exit and Try Again \n");
       return 0;
     }
+    printk("SysMon: Process Active_MM retrieved successfully\n");
+
 
     for (i = 0; i < PAGES_TOTAL; i++) page_heat[i] = -1;
     for (i = 0; i < ITERATIONS; i++) hot_pages[i] = 0;
@@ -214,8 +217,8 @@ static int scan_pgtable(void)
             continue;
           }
           pte_unmap_unlock(ptep, ptl);
-        }
-      }
+        }  /* for (address)*/
+      } /* for (vma) */
 
       // Count no. of hot pages
       num_vpages = 0;
@@ -257,12 +260,11 @@ static int scan_pgtable(void)
             }
           }
           pg_cnt++;
-
           pte_unmap_unlock(ptep, ptl);
         }
         num_vpages += (int)((end - start) / PAGE_SIZE);
-      }
-    }
+      } /* for (vma) */
+    }  /* for (cycle_index++) */
     /******************************OUTPUT******************************/
     for (i = 0; i < PAGES_TOTAL; i++)
     {
@@ -305,8 +307,10 @@ static int scan_pgtable(void)
     printk("and the number of used pages is %d\n", all_pages);
     /******************************************************************/
 
-    return 1;
-  }
+  //   return 1;
+  } /* else */
+
+  return 1;
 }
 /**********************************/
 

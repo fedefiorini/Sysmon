@@ -42,7 +42,7 @@
 /* No. of pages */
 #define PAGES_TOTAL  	300000
 /* Sampling interval */
-#define TIME_INTERVAL	5
+#define TIME_INTERVAL	30
 /* Ranges of page no. */
 #define VH			200
 #define H				150
