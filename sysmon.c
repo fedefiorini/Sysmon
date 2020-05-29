@@ -38,11 +38,15 @@
 
 
 /* INFO: Adjust constants as required */
+/* Sampling interval */
 #define TIME_INTERVAL 30
+/* No. of pages in memory (check this value) */
+#define PAGES_TOTAL   1000000
 /**************************************/
 
 /* Variables declaration */
 struct timer_list stimer;
+long page_heat[PAGES_TOTAL];    /* Page hotness counter */
 
 static int process_id;
 module_param(process_id, int, S_IRUGO | S_IWUSR);
@@ -67,6 +71,7 @@ static struct task_struct* get_process(void)
 /* Memory Access Functions */
 static int scan_pgtable(void)
 {
+  /* Benchmark (profiled) process */ 
   struct task_struct *bench_process;
 
   struct mm_struct *mm;
@@ -74,7 +79,7 @@ static int scan_pgtable(void)
   if ((bench_process = get_process()) == NULL)
   {
     /* Something went wrong with the process */
-    pritnk("SysMon: No Process Handle. Exit and Try Again\n");
+    printk("SysMon: No Process Handle. Exit and Try Again\n");
     return 0;
   }
   else
@@ -88,7 +93,7 @@ static int scan_pgtable(void)
     }
     else
     {
-      return 1;
+
     } /* mm not null */
   } /* process not null */
 }
@@ -102,8 +107,6 @@ static void timer_handler(struct timer_list *aTimer)
 
   res = scan_pgtable();
   if (!res) printk("SysMon: Something Went Wrong\n");
-
-  printk("Module Working\n");
 }
 
 static int __init timer_init(void)
