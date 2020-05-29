@@ -65,9 +65,32 @@ static struct task_struct* get_process(void)
 /**********************************************/
 
 /* Memory Access Functions */
-static int get_result(void)
+static int scan_pgtable(void)
 {
-  
+  struct task_struct *bench_process;
+
+  struct mm_struct *mm;
+
+  if ((bench_process = get_process()) == NULL)
+  {
+    /* Something went wrong with the process */
+    pritnk("SysMon: No Process Handle. Exit and Try Again\n");
+    return 0;
+  }
+  else
+  {
+    mm = bench_process->mm;
+    if (mm == NULL)
+    {
+      /* Something went wrong when accessing process' memory */
+      printk("SysMon: Process MM is NULL. Exit and Try Again\n");
+      return 0;
+    }
+    else
+    {
+      return 1;
+    } /* mm not null */
+  } /* process not null */
 }
 /***************************/
 
@@ -77,7 +100,7 @@ static void timer_handler(struct timer_list *aTimer)
   int res = 0;
   mod_timer(&stimer, jiffies + (TIME_INTERVAL * HZ));
 
-  res = get_result();
+  res = scan_pgtable();
   if (!res) printk("SysMon: Something Went Wrong\n");
 
   printk("Module Working\n");
