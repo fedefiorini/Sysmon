@@ -266,47 +266,47 @@ static int scan_pgtable(void)
       } /* for (vma) */
     }  /* for (cycle_index++) */
     /******************************OUTPUT******************************/
-    for (i = 0; i < PAGES_TOTAL; i++)
-    {
-      if (page_heat[i] < VH && page_heat[i] > H) h++;
-      if (page_heat[i] <= H && page_heat[i] > M) m++;
-      if (page_heat[i] <= M && page_heat[i] > L) l++;
-      if (page_heat[i] <= L && page_heat[i] > VL_MAX) l2++;
-      if (page_heat[i] <= VL_MAX && page_heat[i] > VL_MIN) l3++;
-      if (page_heat[i] <= VL_MIN && page_heat[i] > 0) l4++;
-      if (page_heat[i] > -1) all_pages++;
-    }
-
-    /* Print results on screen (dmesg output - syslog) */
-    printk("[LOG]: After %d sampling loops ", ITERATIONS);
-    printk("this is the result of the physical page accessing frequence\n");
-    printk("H(150,200): %d\n", h);
-    printk("M(100,150]: %d\n", m);
-    printk("L(64,100]: %d\n",  l);
-    printk("LL(10,64]: %d\n",  l2);
-    printk("LLL(5,10]: %d\n",  l3);
-    printk("LLLL(1,5]: %d\n",  l4);
-
-    /* Calculate average number of hot pages per iteration */
-    for (i = 0; i < ITERATIONS; i++)
-    {
-      avg_hotpage += hot_pages[i];
-      avg_hotpage /= (i + 1);
-    }
-
-    /* Print results for memory accesses across all pages */
-    for (i = 0; i < ITERATIONS; i++)
-    {
-      if (page_heat[i] > -1) num_access += (page_heat[i] + 1);
-    }
-    printk("[LOG]: The number of accesses is %d, on average %d \n", num_access, num_access / ITERATIONS);
-    avg_pg_util = num_access / all_pages;
-
-    printk("[LOG]: The average number of hot pages is %d, ", avg_hotpage);
-    printk("the average utilization per page is %d ", avg_pg_util);
-    printk("and the number of used pages is %d\n", all_pages);
+    // for (i = 0; i < PAGES_TOTAL; i++)
+    // {
+    //   if (page_heat[i] < VH && page_heat[i] > H) h++;
+    //   if (page_heat[i] <= H && page_heat[i] > M) m++;
+    //   if (page_heat[i] <= M && page_heat[i] > L) l++;
+    //   if (page_heat[i] <= L && page_heat[i] > VL_MAX) l2++;
+    //   if (page_heat[i] <= VL_MAX && page_heat[i] > VL_MIN) l3++;
+    //   if (page_heat[i] <= VL_MIN && page_heat[i] > 0) l4++;
+    //   if (page_heat[i] > -1) all_pages++;
+    // }
+    //
+    // /* Print results on screen (dmesg output - syslog) */
+    // printk("[LOG]: After %d sampling loops ", ITERATIONS);
+    // printk("this is the result of the physical page accessing frequence\n");
+    // printk("H(150,200): %d\n", h);
+    // printk("M(100,150]: %d\n", m);
+    // printk("L(64,100]: %d\n",  l);
+    // printk("LL(10,64]: %d\n",  l2);
+    // printk("LLL(5,10]: %d\n",  l3);
+    // printk("LLLL(1,5]: %d\n",  l4);
+    //
+    // /* Calculate average number of hot pages per iteration */
+    // for (i = 0; i < ITERATIONS; i++)
+    // {
+    //   avg_hotpage += hot_pages[i];
+    //   avg_hotpage /= (i + 1);
+    // }
+    //
+    // /* Print results for memory accesses across all pages */
+    // for (i = 0; i < ITERATIONS; i++)
+    // {
+    //   if (page_heat[i] > -1) num_access += (page_heat[i] + 1);
+    // }
+    // printk("[LOG]: The number of accesses is %d, on average %d \n", num_access, num_access / ITERATIONS);
+    // avg_pg_util = num_access / all_pages;
+    //
+    // printk("[LOG]: The average number of hot pages is %d, ", avg_hotpage);
+    // printk("the average utilization per page is %d ", avg_pg_util);
+    // printk("and the number of used pages is %d\n", all_pages);
     /******************************************************************/
-
+    printk("Done\n");
   //   return 1;
   } /* else */
 
