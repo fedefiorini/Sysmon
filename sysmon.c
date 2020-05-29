@@ -36,21 +36,49 @@
 #include <linux/elf.h>
 #include <linux/version.h>
 
+
 /* INFO: Adjust constants as required */
 #define TIME_INTERVAL 30
 /**************************************/
 
 /* Variables declaration */
 struct timer_list stimer;
+
+static int process_id;
+module_param(process_id, int, S_IRUGO | S_IWUSR);
 /*************************/
 
+/* Retrieve the process interested to monitor */
+static struct task_struct* get_process(void)
+{
+  struct pid* pid;
+
+  /* Check that process_id has been passed correctly */
+  if (process_id != 0)
+  {
+    pid = find_vpid(process_id);
+
+    return pid_task(pid, PIDTYPE_PID);
+  }
+  else return NULL;
+}
+/**********************************************/
+
 /* Memory Access Functions */
+static int get_result(void)
+{
+  
+}
 /***************************/
 
 /* Timer functions (init, exit, timer handler) */
 static void timer_handler(struct timer_list *aTimer)
 {
+  int res = 0;
   mod_timer(&stimer, jiffies + (TIME_INTERVAL * HZ));
+
+  res = get_result();
+  if (!res) printk("SysMon: Something Went Wrong\n");
 
   printk("Module Working\n");
 }
