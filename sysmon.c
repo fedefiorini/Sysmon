@@ -38,23 +38,23 @@
 
 /* INFO: Adjust constants as required */
 /* No. of sampling loops */
-#define ITERATIONS		200
+#define ITERATIONS		100
 /* No. of pages */
-#define PAGES_TOTAL  	300000
+#define PAGES_TOTAL  	1000000
 /* Sampling interval */
-#define TIME_INTERVAL	5
+#define TIME_INTERVAL	15
 /* Ranges of page no. */
 #define VH			200
 #define H				150
 #define M				100
 #define L   		64
 #define VL_MAX	10
-#define VL_MIN	5
+#define VL_MIN	5      // Check these values...
 /**************************************/
 
 /* Variables declaration */
 struct timer_list stimer;
-long long page_heat[PAGES_TOTAL];
+int page_heat[PAGES_TOTAL];
 
 static int process_id;
 module_param(process_id, int, S_IRUGO|S_IWUSR); //Define process_id as module parameter
@@ -62,6 +62,7 @@ module_param(process_id, int, S_IRUGO|S_IWUSR); //Define process_id as module pa
 
 /* Memory Access Functions */
 static int scan_pgtable(void);
+static task_struct *get_process(void);
 /***************************/
 
 /* Timer functions (init, exit, timer handler) */
@@ -102,9 +103,22 @@ static void __exit timer_exit(void)
 /***********************************************/
 
 /* Memory scanning implementation */
+static task_struct *get_process(void)
+{
+  struct pid *pid;
+
+  /* Check that process_id has been passed correctly */
+  if (process_id != 0)
+  {
+    pid = find_vpid(process_id);
+  }
+
+  return pid_task(pid, PIDTYPE_PID);
+}
+
 static int scan_pgtable(void)
 {
-  /* Current process */
+  /* Benchmark (profiled) process */
   struct task_struct *proc;
 
   /* Page Table levels (implemented 5-level) */
@@ -124,30 +138,29 @@ static int scan_pgtable(void)
   unsigned long address = 0;
 
   /* Memory report variables */
-  int num_hot_pages = 0;  // No. of hot pages
   int num_vpages    = 0;
   int cycle_index   = 0;  // Loop counter
-  int hot_pages[ITERATIONS];
+  // int hot_pages[ITERATIONS];
   int i             = 0;
-
-  /* Temporary counters */
+  //
+  // /* Temporary counters */
   int pg_cnt        = 0;
   int num_cur_pg    = 0;
+  //
+  // /* Page "heat" variables */
+  // int h             = 0;
+  // int m             = 0;
+  // int l             = 0;
+  // int l2            = 0;
+  // int l3            = 0;
+  // int l4            = 0;
+  //
+  // int all_pages     = 0;  // Total no. of pages
+  // int avg_hotpage   = 0;  // Avg no. of hot pages (per iteration)
+  // int num_access    = 0;  // Total no. of memory accesses (all pages)
+  // int avg_pg_util   = 0;  // Avg utilization for each page
 
-  /* Page "heat" variables */
-  int h             = 0;
-  int m             = 0;
-  int l             = 0;
-  int l2            = 0;
-  int l3            = 0;
-  int l4            = 0;
-
-  int all_pages     = 0;  // Total no. of pages
-  int avg_hotpage   = 0;  // Avg no. of hot pages (per iteration)
-  int num_access    = 0;  // Total no. of memory accesses (all pages)
-  int avg_pg_util   = 0;  // Avg utilization for each page
-
-  if ((proc = get_current()) == NULL)
+  if ((proc = get_process()) == NULL)
   {
     // Something went wrong...
     printk("SysMon: Get No Process Handle. Exit and Try Again \n");
@@ -155,8 +168,7 @@ static int scan_pgtable(void)
   }
   else
   {
-    //mm = proc->mm; changed to active_mm (kernel thread)
-    mm = proc->active_mm;
+    mm = proc->mm;
     if (mm == NULL)
     {
       // Something went wrong...
@@ -165,13 +177,10 @@ static int scan_pgtable(void)
     }
 
     for (i = 0; i < PAGES_TOTAL; i++) page_heat[i] = -1;
-    for (i = 0; i < ITERATIONS; i++) hot_pages[i] = 0;
+    // for (i = 0; i < ITERATIONS; i++) hot_pages[i] = 0;
 
     for (cycle_index = 0; cycle_index < ITERATIONS; cycle_index++)
     {
-      // Initialize the no. of hot pages to zero at every loop
-      num_hot_pages = 0;
-
       // Start scanning each VMA
       for (vma = mm->mmap; vma; vma = vma->vm_next)
       {
@@ -214,12 +223,12 @@ static int scan_pgtable(void)
             continue;
           }
           pte_unmap_unlock(ptep, ptl);
-        }
-      }
+        } /* for (address) */
+      } /* for (vma) */
 
       // Count no. of hot pages
       num_vpages = 0;
-
+      i = 0;
       for (vma = mm->mmap; vma; vma = vma->vm_next)
       {
         start   = vma->vm_start;
@@ -253,56 +262,19 @@ static int scan_pgtable(void)
               // Hot Pages
               num_cur_pg = pg_cnt + num_vpages;
               page_heat[num_cur_pg]++;
-              hot_pages[cycle_index]++;
+              // hot_pages[cycle_index]++;
             }
           }
           pg_cnt++;
 
           pte_unmap_unlock(ptep, ptl);
-        }
+        } /* for (address) */
+        i++;
         num_vpages += (int)((end - start) / PAGE_SIZE);
-      }
-    }
+        printk("Num_vpages %d vma %d\n", num_vpages, i);
+      } /* for (vma) */
+    } /* for (iterations) */
     /******************************OUTPUT******************************/
-    for (i = 0; i < PAGES_TOTAL; i++)
-    {
-      if (page_heat[i] < VH && page_heat[i] > H) h++;
-      if (page_heat[i] <= H && page_heat[i] > M) m++;
-      if (page_heat[i] <= M && page_heat[i] > L) l++;
-      if (page_heat[i] <= L && page_heat[i] > VL_MAX) l2++;
-      if (page_heat[i] <= VL_MAX && page_heat[i] > VL_MIN) l3++;
-      if (page_heat[i] <= VL_MIN && page_heat[i] > 0) l4++;
-      if (page_heat[i] > -1) all_pages++;
-    }
-
-    /* Print results on screen (dmesg output - syslog) */
-    printk("[LOG]: After %d sampling loops ", ITERATIONS);
-    printk("this is the result of the physical page accessing frequence\n");
-    printk("H(150,200): %d\n", h);
-    printk("M(100,150]: %d\n", m);
-    printk("L(64,100]: %d\n",  l);
-    printk("LL(10,64]: %d\n",  l2);
-    printk("LLL(5,10]: %d\n",  l3);
-    printk("LLLL(1,5]: %d\n",  l4);
-
-    /* Calculate average number of hot pages per iteration */
-    for (i = 0; i < ITERATIONS; i++)
-    {
-      avg_hotpage += hot_pages[i];
-      avg_hotpage /= (i + 1);
-    }
-
-    /* Print results for memory accesses across all pages */
-    for (i = 0; i < ITERATIONS; i++)
-    {
-      if (page_heat[i] > -1) num_access += (page_heat[i] + 1);
-    }
-    printk("[LOG]: The number of accesses is %d, on average %d \n", num_access, num_access / ITERATIONS);
-    avg_pg_util = num_access / all_pages;
-
-    printk("[LOG]: The average number of hot pages is %d, ", avg_hotpage);
-    printk("the average utilization per page is %d ", avg_pg_util);
-    printk("and the number of used pages is %d\n", all_pages);
     /******************************************************************/
 
     return 1;
